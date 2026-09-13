@@ -382,6 +382,9 @@
       <span id="liveReadingTime">No reading yet</span>
       <span id="deviceLogCount">Device log: &mdash;</span>
     </div>
+    <div class="readout-meta" style="margin-top:4px;">
+      <span id="liveBattery">Battery: &mdash;</span>
+    </div>
   </section>
 
   <section class="panel">
@@ -492,7 +495,8 @@
     logEntry:       '6f731005-cae3-4f5c-b3b1-0123456789ab',
     command:        '6f731006-cae3-4f5c-b3b1-0123456789ab',
     interval:       '6f731007-cae3-4f5c-b3b1-0123456789ab',
-    graphMetric:    '6f731008-cae3-4f5c-b3b1-0123456789ab'
+    graphMetric:    '6f731008-cae3-4f5c-b3b1-0123456789ab',
+    battery:        '6f731009-cae3-4f5c-b3b1-0123456789ab'
   };
   var CMD_ERASE_LOG = 0x01;
 
@@ -508,6 +512,7 @@
     livePres: document.getElementById('livePres'),
     liveReadingTime: document.getElementById('liveReadingTime'),
     deviceLogCount: document.getElementById('deviceLogCount'),
+    liveBattery: document.getElementById('liveBattery'),
     intervalCurrent: document.getElementById('intervalCurrent'),
     intervalCustomMin: document.getElementById('intervalCustomMin'),
     intervalSetBtn: document.getElementById('intervalSetBtn'),
@@ -621,6 +626,7 @@
       state.chars.command = await service.getCharacteristic(CHAR_UUIDS.command);
       state.chars.interval = await service.getCharacteristic(CHAR_UUIDS.interval);
       state.chars.graphMetric = await service.getCharacteristic(CHAR_UUIDS.graphMetric);
+      state.chars.battery = await service.getCharacteristic(CHAR_UUIDS.battery);
       diag('All characteristics found. Syncing time...');
 
       // Sync the device's clock to this phone's time on every connect.
@@ -631,6 +637,7 @@
       await refreshDeviceLogCount();
       await refreshInterval();
       await refreshGraphMetric();
+      await refreshBattery();
       diag('Connected successfully.');
 
       setStatus(true, 'Connected');
@@ -686,6 +693,13 @@
     els.liveHum.textContent = entry.humidity.toFixed(1);
     els.livePres.textContent = entry.pressureHPa.toFixed(0);
     els.liveReadingTime.textContent = 'Reading at ' + fmtTime(entry.epochSeconds) + ' UTC';
+  }
+
+  async function refreshBattery() {
+    var value = await state.chars.battery.readValue();
+    var voltage = value.getFloat32(0, true);
+    var percent = value.getUint8(4);
+    els.liveBattery.textContent = 'Battery: ' + voltage.toFixed(2) + 'V (' + percent + '%)';
   }
 
   async function refreshDeviceLogCount() {
