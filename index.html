@@ -365,6 +365,23 @@
     </div>
   </section>
 
+  <section class="panel">
+    <p class="panel-label">Log Interval</p>
+    <div class="hint" id="intervalCurrent" style="margin-bottom:8px;">Current: &mdash; (connect to view)</div>
+    <div class="btn-row" style="margin-bottom:8px;">
+      <button class="interval-preset" data-seconds="60" disabled>1 min</button>
+      <button class="interval-preset" data-seconds="300" disabled>5 min</button>
+      <button class="interval-preset" data-seconds="900" disabled>15 min</button>
+      <button class="interval-preset" data-seconds="1800" disabled>30 min</button>
+      <button class="interval-preset" data-seconds="3600" disabled>1 hour</button>
+      <button class="interval-preset" data-seconds="21600" disabled>6 hours</button>
+    </div>
+    <div class="btn-row">
+      <input type="number" id="intervalCustomMin" min="1" placeholder="Custom (minutes)" style="flex:1; min-width:0; background:var(--surface-2); border:1px solid var(--border); border-radius:7px; color:var(--text); padding:11px 12px; font-family:var(--font-mono); font-size:12px;">
+      <button id="intervalSetBtn" disabled>Set</button>
+    </div>
+  </section>
+
   <section class="btn-row">
     <button class="primary" id="connectBtn">Connect</button>
     <button id="syncBtn" disabled>Sync Log</button>
@@ -444,7 +461,8 @@
     logCount:       '6f731003-cae3-4f5c-b3b1-0123456789ab',
     logIndex:       '6f731004-cae3-4f5c-b3b1-0123456789ab',
     logEntry:       '6f731005-cae3-4f5c-b3b1-0123456789ab',
-    command:        '6f731006-cae3-4f5c-b3b1-0123456789ab'
+    command:        '6f731006-cae3-4f5c-b3b1-0123456789ab',
+    interval:       '6f731007-cae3-4f5c-b3b1-0123456789ab'
   };
   var CMD_ERASE_LOG = 0x01;
 
@@ -460,6 +478,9 @@
     livePres: document.getElementById('livePres'),
     liveReadingTime: document.getElementById('liveReadingTime'),
     deviceLogCount: document.getElementById('deviceLogCount'),
+    intervalCurrent: document.getElementById('intervalCurrent'),
+    intervalCustomMin: document.getElementById('intervalCustomMin'),
+    intervalSetBtn: document.getElementById('intervalSetBtn'),
     progressSection: document.getElementById('progressSection'),
     progressFill: document.getElementById('progressFill'),
     progressText: document.getElementById('progressText'),
@@ -568,6 +589,7 @@
       state.chars.logIndex = await service.getCharacteristic(CHAR_UUIDS.logIndex);
       state.chars.logEntry = await service.getCharacteristic(CHAR_UUIDS.logEntry);
       state.chars.command = await service.getCharacteristic(CHAR_UUIDS.command);
+      state.chars.interval = await service.getCharacteristic(CHAR_UUIDS.interval);
       diag('All characteristics found. Syncing time...');
 
       // Sync the device's clock to this phone's time on every connect.
@@ -576,12 +598,14 @@
 
       await refreshLiveReading();
       await refreshDeviceLogCount();
+      await refreshInterval();
       diag('Connected successfully.');
 
       setStatus(true, 'Connected');
       els.connectBtn.textContent = 'Disconnect';
       els.syncBtn.disabled = false;
       els.clearBtn.disabled = false;
+      setIntervalControlsEnabled(true);
     } catch (err) {
       console.error(err);
       diag('ERROR: ' + (err && (err.name + ': ' + err.message) || err));
@@ -605,7 +629,14 @@
     els.connectBtn.textContent = 'Connect';
     els.syncBtn.disabled = true;
     els.clearBtn.disabled = true;
+    setIntervalControlsEnabled(false);
+    els.intervalCurrent.textContent = 'Current: — (connect to view)';
     state.chars = {};
+  }
+
+  function setIntervalControlsEnabled(enabled) {
+    document.querySelectorAll('.interval-preset').forEach(function (b) { b.disabled = !enabled; });
+    els.intervalSetBtn.disabled = !enabled;
   }
 
   async function refreshLiveReading() {
@@ -623,6 +654,32 @@
     var count = le32(value, 0);
     els.deviceLogCount.textContent = 'Device log: ' + count + ' entries';
     return count;
+  }
+
+  function formatInterval(seconds) {
+    if (seconds < 60) return seconds + 's';
+    if (seconds < 3600) return (seconds / 60) + ' min';
+    var hours = seconds / 3600;
+    return (hours % 1 === 0 ? hours : hours.toFixed(1)) + ' hour' + (hours === 1 ? '' : 's');
+  }
+
+  async function refreshInterval() {
+    var value = await state.chars.interval.readValue();
+    var seconds = le32(value, 0);
+    els.intervalCurrent.textContent = 'Current: ' + formatInterval(seconds);
+    return seconds;
+  }
+
+  async function setLogInterval(seconds) {
+    if (!state.chars.interval) return;
+    try {
+      await writeUint32(state.chars.interval, seconds);
+      await refreshInterval();
+      diag('Interval set to ' + seconds + 's.');
+    } catch (err) {
+      diag('Set interval failed: ' + (err.message || err));
+      alert('Failed to set interval: ' + (err.message || err));
+    }
   }
 
   async function syncLog() {
@@ -967,6 +1024,17 @@
       state.activeMetric = btn.getAttribute('data-metric');
       renderChart();
     });
+  });
+
+  document.querySelectorAll('.interval-preset').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      setLogInterval(parseInt(btn.getAttribute('data-seconds'), 10));
+    });
+  });
+  els.intervalSetBtn.addEventListener('click', function () {
+    var minutes = parseFloat(els.intervalCustomMin.value);
+    if (!minutes || minutes <= 0) { alert('Enter a number of minutes greater than 0.'); return; }
+    setLogInterval(Math.round(minutes * 60));
   });
 
   // Chart scrubbing: drag/hover along the chart to see value + time at a point.
