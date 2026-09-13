@@ -1,4 +1,4 @@
-<title>Camp Logger</title>
+<title>Temp Logger</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
 <style>
   :root {
@@ -94,6 +94,23 @@
     color: var(--text-dim);
     margin: 0 0 10px;
   }
+
+  .diag-summary {
+    cursor: pointer;
+    margin: 0;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .diag-summary::-webkit-details-marker { display: none; }
+  .diag-summary::after {
+    content: '+';
+    font-family: var(--font-display);
+    font-size: 16px;
+    color: var(--accent);
+  }
+  #diagPanel[open] .diag-summary::after { content: '\2212'; }
 
   /* ---- live readout ---- */
   .readout-grid {
@@ -243,6 +260,7 @@
   }
 
   .tab-btn.active { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
+  .interval-preset.active { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
 
   .chart-wrap { position: relative; touch-action: pan-y; }
   svg.chart { width: 100%; height: auto; display: block; }
@@ -335,7 +353,7 @@
 
 <div class="console">
   <header>
-    <div class="eyebrow">CAMP LOGGER</div>
+    <div class="eyebrow">TEMP LOGGER</div>
     <div class="status-pill" id="statusPill"><span class="status-dot"></span><span id="statusText">Disconnected</span></div>
   </header>
 
@@ -389,11 +407,11 @@
     <button class="danger" id="clearBtn" disabled>Clear Device</button>
   </section>
 
-  <section class="panel" id="diagPanel">
-    <p class="panel-label">Diagnostics</p>
-    <div class="hint" id="diagBtSupport">Checking Web Bluetooth support...</div>
+  <details class="panel" id="diagPanel">
+    <summary class="panel-label diag-summary">Diagnostics</summary>
+    <div class="hint" id="diagBtSupport" style="margin-top:10px;">Checking Web Bluetooth support...</div>
     <div class="hint" id="diagLog" style="margin-top:8px; white-space:pre-wrap; word-break:break-word;"></div>
-  </section>
+  </details>
 
   <section id="progressSection" hidden>
     <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
@@ -635,7 +653,10 @@
   }
 
   function setIntervalControlsEnabled(enabled) {
-    document.querySelectorAll('.interval-preset').forEach(function (b) { b.disabled = !enabled; });
+    document.querySelectorAll('.interval-preset').forEach(function (b) {
+      b.disabled = !enabled;
+      if (!enabled) b.classList.remove('active');
+    });
     els.intervalSetBtn.disabled = !enabled;
   }
 
@@ -667,6 +688,9 @@
     var value = await state.chars.interval.readValue();
     var seconds = le32(value, 0);
     els.intervalCurrent.textContent = 'Current: ' + formatInterval(seconds);
+    document.querySelectorAll('.interval-preset').forEach(function (b) {
+      b.classList.toggle('active', parseInt(b.getAttribute('data-seconds'), 10) === seconds);
+    });
     return seconds;
   }
 
