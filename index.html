@@ -422,6 +422,9 @@
     <button id="exportBtn" disabled>Export CSV</button>
     <button class="danger" id="clearBtn" disabled>Clear Device</button>
   </section>
+  <section class="btn-row">
+    <button class="danger" id="clearLocalBtn">Clear Local History</button>
+  </section>
 
   <details class="panel" id="diagPanel">
     <summary class="panel-label diag-summary">Diagnostics</summary>
@@ -512,6 +515,7 @@
     syncBtn: document.getElementById('syncBtn'),
     exportBtn: document.getElementById('exportBtn'),
     clearBtn: document.getElementById('clearBtn'),
+    clearLocalBtn: document.getElementById('clearLocalBtn'),
     statusPill: document.getElementById('statusPill'),
     statusText: document.getElementById('statusText'),
     liveTemp: document.getElementById('liveTemp'),
@@ -813,6 +817,25 @@
     }
   }
 
+  async function clearLocalHistory() {
+    if (!confirm('Clear the synced history stored on this phone? This does not touch the device\'s own log — use Clear Device for that. Cannot be undone.')) return;
+    try { localStorage.removeItem(LOCAL_STORAGE_KEY); } catch (e) { diag('localStorage clear failed: ' + e.message); }
+
+    var db = await getDb();
+    if (db) {
+      try {
+        var snap = await db.collection('entries').get();
+        for (var i = 0; i < snap.docs.length; i++) {
+          await db.doc('entries/' + snap.docs[i].id).delete();
+        }
+      } catch (e) { diag('db clear failed: ' + e.message); }
+    }
+
+    state.allEntries = [];
+    await renderAll();
+    alert('Local history cleared.');
+  }
+
   // ---------- persistence ----------
   // Prefers the Claude `db` capability (when this page is viewed as a
   // published artifact); falls back to localStorage for standalone/local-file
@@ -925,7 +948,7 @@
       if (e.tempC > tMax) tMax = e.tempC;
       if (e.humidity < hMin) hMin = e.humidity;
       if (e.humidity > hMax) hMax = e.humidity;
-      if (e.batteryV !== undefined) {
+      if (hasValidValue(e.batteryV)) {
         haveBattery = true;
         if (e.batteryV < bMin) bMin = e.batteryV;
         if (e.batteryV > bMax) bMax = e.batteryV;
@@ -944,7 +967,7 @@
     var rows = state.allEntries.slice().reverse().slice(0, 200).map(function (e) {
       return '<tr><td>' + fmtTime(e.epochSeconds) + '</td><td>' + e.tempC.toFixed(1) +
         '</td><td>' + e.humidity.toFixed(1) + '</td><td>' + e.pressureHPa.toFixed(0) +
-        '</td><td>' + (e.batteryV !== undefined ? e.batteryV.toFixed(2) : '—') + '</td></tr>';
+        '</td><td>' + (hasValidValue(e.batteryV) ? e.batteryV.toFixed(2) : '—') + '</td></tr>';
     });
     els.logTableBody.innerHTML = rows.join('');
   }
@@ -956,6 +979,10 @@
     batteryV: { label: 'V', color: 'var(--accent-purple)' }
   };
 
+  function hasValidValue(v) {
+    return v !== undefined && !isNaN(v);
+  }
+
   function metricDecimals(metric) {
     if (metric === 'pressureHPa') return 0;
     if (metric === 'batteryV') return 2;
@@ -966,7 +993,7 @@
     var metric = state.activeMetric;
     // Older synced entries (from before a field was added) won't have it -
     // skip them for this metric rather than crash on undefined.
-    var data = state.allEntries.filter(function (e) { return e[metric] !== undefined; });
+    var data = state.allEntries.filter(function (e) { return hasValidValue(e[metric]); });
     if (data.length < 2) {
       els.chartHolder.innerHTML = '<p class="chart-empty">Need at least 2 synced readings to chart</p>';
       els.chartTooltip.hidden = true;
@@ -1080,7 +1107,7 @@
     state.allEntries.forEach(function (e) {
       rows.push([e.epochSeconds, new Date(e.epochSeconds * 1000).toISOString(),
         e.tempC.toFixed(2), e.humidity.toFixed(2), e.pressureHPa.toFixed(2),
-        e.batteryV !== undefined ? e.batteryV.toFixed(3) : ''].join(','));
+        hasValidValue(e.batteryV) ? e.batteryV.toFixed(3) : ''].join(','));
     });
     var csv = rows.join('\n');
     var fname = 'camp-logger-' + new Date().toISOString().slice(0, 10) + '.csv';
@@ -1122,6 +1149,7 @@
   });
   els.syncBtn.addEventListener('click', syncLog);
   els.clearBtn.addEventListener('click', clearDevice);
+  els.clearLocalBtn.addEventListener('click', clearLocalHistory);
   els.exportBtn.addEventListener('click', exportCsv);
 
   document.querySelectorAll('.tab-btn').forEach(function (btn) {
