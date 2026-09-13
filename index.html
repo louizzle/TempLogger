@@ -261,6 +261,7 @@
 
   .tab-btn.active { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
   .interval-preset.active { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
+  .metric-preset.active { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
 
   .chart-wrap { position: relative; touch-action: pan-y; }
   svg.chart { width: 100%; height: auto; display: block; }
@@ -400,6 +401,16 @@
     </div>
   </section>
 
+  <section class="panel">
+    <p class="panel-label">E-Paper Graph</p>
+    <div class="hint" style="margin-bottom:8px;">Which metric the device's own screen graphs (separate from the chart below).</div>
+    <div class="btn-row">
+      <button class="metric-preset" data-value="0" disabled>Temp</button>
+      <button class="metric-preset" data-value="1" disabled>Humidity</button>
+      <button class="metric-preset" data-value="2" disabled>Pressure</button>
+    </div>
+  </section>
+
   <section class="btn-row">
     <button class="primary" id="connectBtn">Connect</button>
     <button id="syncBtn" disabled>Sync Log</button>
@@ -480,7 +491,8 @@
     logIndex:       '6f731004-cae3-4f5c-b3b1-0123456789ab',
     logEntry:       '6f731005-cae3-4f5c-b3b1-0123456789ab',
     command:        '6f731006-cae3-4f5c-b3b1-0123456789ab',
-    interval:       '6f731007-cae3-4f5c-b3b1-0123456789ab'
+    interval:       '6f731007-cae3-4f5c-b3b1-0123456789ab',
+    graphMetric:    '6f731008-cae3-4f5c-b3b1-0123456789ab'
   };
   var CMD_ERASE_LOG = 0x01;
 
@@ -608,6 +620,7 @@
       state.chars.logEntry = await service.getCharacteristic(CHAR_UUIDS.logEntry);
       state.chars.command = await service.getCharacteristic(CHAR_UUIDS.command);
       state.chars.interval = await service.getCharacteristic(CHAR_UUIDS.interval);
+      state.chars.graphMetric = await service.getCharacteristic(CHAR_UUIDS.graphMetric);
       diag('All characteristics found. Syncing time...');
 
       // Sync the device's clock to this phone's time on every connect.
@@ -617,6 +630,7 @@
       await refreshLiveReading();
       await refreshDeviceLogCount();
       await refreshInterval();
+      await refreshGraphMetric();
       diag('Connected successfully.');
 
       setStatus(true, 'Connected');
@@ -658,6 +672,10 @@
       if (!enabled) b.classList.remove('active');
     });
     els.intervalSetBtn.disabled = !enabled;
+    document.querySelectorAll('.metric-preset').forEach(function (b) {
+      b.disabled = !enabled;
+      if (!enabled) b.classList.remove('active');
+    });
   }
 
   async function refreshLiveReading() {
@@ -703,6 +721,29 @@
     } catch (err) {
       diag('Set interval failed: ' + (err.message || err));
       alert('Failed to set interval: ' + (err.message || err));
+    }
+  }
+
+  var METRIC_NAMES = { 0: 'Temp', 1: 'Humidity', 2: 'Pressure' };
+
+  async function refreshGraphMetric() {
+    var value = await state.chars.graphMetric.readValue();
+    var metric = value.getUint8(0);
+    document.querySelectorAll('.metric-preset').forEach(function (b) {
+      b.classList.toggle('active', parseInt(b.getAttribute('data-value'), 10) === metric);
+    });
+    return metric;
+  }
+
+  async function setGraphMetric(metric) {
+    if (!state.chars.graphMetric) return;
+    try {
+      await state.chars.graphMetric.writeValueWithResponse(new Uint8Array([metric]));
+      await refreshGraphMetric();
+      diag('E-paper graph set to ' + METRIC_NAMES[metric] + '.');
+    } catch (err) {
+      diag('Set graph metric failed: ' + (err.message || err));
+      alert('Failed to set e-paper graph: ' + (err.message || err));
     }
   }
 
@@ -1059,6 +1100,12 @@
     var minutes = parseFloat(els.intervalCustomMin.value);
     if (!minutes || minutes <= 0) { alert('Enter a number of minutes greater than 0.'); return; }
     setLogInterval(Math.round(minutes * 60));
+  });
+
+  document.querySelectorAll('.metric-preset').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      setGraphMetric(parseInt(btn.getAttribute('data-value'), 10));
+    });
   });
 
   // Chart scrubbing: drag/hover along the chart to see value + time at a point.
