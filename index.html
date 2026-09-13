@@ -11,6 +11,7 @@
     --accent: #4dff8f;
     --accent-amber: #ffb454;
     --accent-blue: #6fd3ff;
+    --accent-purple: #c792ff;
     --danger: #ff6b6b;
     --font-display: 'VT323', 'Courier New', monospace;
     --font-mono: 'JetBrains Mono', 'Courier New', monospace;
@@ -451,6 +452,10 @@
         <div class="tile-label">Humidity min / max</div>
         <div class="tile-value" id="tileHum" style="font-size:16px;">&mdash;</div>
       </div>
+      <div class="tile">
+        <div class="tile-label">Battery min / max</div>
+        <div class="tile-value" id="tileBattery" style="font-size:16px;">&mdash;</div>
+      </div>
     </div>
   </section>
 
@@ -460,6 +465,7 @@
       <button class="tab-btn active" data-metric="tempC">Temp</button>
       <button class="tab-btn" data-metric="humidity">Humidity</button>
       <button class="tab-btn" data-metric="pressureHPa">Pressure</button>
+      <button class="tab-btn" data-metric="batteryV">Battery</button>
     </div>
     <div class="chart-wrap" id="chartWrap">
       <div id="chartHolder"><p class="chart-empty">No synced data yet</p></div>
@@ -471,8 +477,8 @@
     <p class="panel-label">Log Table</p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Time (UTC)</th><th>&deg;C</th><th>%RH</th><th>hPa</th></tr></thead>
-        <tbody id="logTableBody"><tr><td colspan="4" class="hint" style="padding:14px;">No synced data yet</td></tr></tbody>
+        <thead><tr><th>Time (UTC)</th><th>&deg;C</th><th>%RH</th><th>hPa</th><th>V</th></tr></thead>
+        <tbody id="logTableBody"><tr><td colspan="5" class="hint" style="padding:14px;">No synced data yet</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -523,6 +529,7 @@
     tileRange: document.getElementById('tileRange'),
     tileTemp: document.getElementById('tileTemp'),
     tileHum: document.getElementById('tileHum'),
+    tileBattery: document.getElementById('tileBattery'),
     chartHolder: document.getElementById('chartHolder'),
     chartWrap: document.getElementById('chartWrap'),
     chartTooltip: document.getElementById('chartTooltip'),
@@ -588,7 +595,8 @@
       epochSeconds: le32(dataView, 0),
       tempC: dataView.getFloat32(4, true),
       humidity: dataView.getFloat32(8, true),
-      pressureHPa: dataView.getFloat32(12, true)
+      pressureHPa: dataView.getFloat32(12, true),
+      batteryV: dataView.byteLength >= 20 ? dataView.getFloat32(16, true) : undefined
     };
   }
 
@@ -903,30 +911,39 @@
       els.tileRange.textContent = '—';
       els.tileTemp.textContent = '—';
       els.tileHum.textContent = '—';
+      els.tileBattery.textContent = '—';
       return;
     }
     var first = state.allEntries[0], last = state.allEntries[n - 1];
     els.tileRange.textContent = fmtDateOnly(first.epochSeconds) + ' → ' + fmtDateOnly(last.epochSeconds);
 
     var tMin = Infinity, tMax = -Infinity, hMin = Infinity, hMax = -Infinity;
+    var bMin = Infinity, bMax = -Infinity, haveBattery = false;
     state.allEntries.forEach(function (e) {
       if (e.tempC < tMin) tMin = e.tempC;
       if (e.tempC > tMax) tMax = e.tempC;
       if (e.humidity < hMin) hMin = e.humidity;
       if (e.humidity > hMax) hMax = e.humidity;
+      if (e.batteryV !== undefined) {
+        haveBattery = true;
+        if (e.batteryV < bMin) bMin = e.batteryV;
+        if (e.batteryV > bMax) bMax = e.batteryV;
+      }
     });
     els.tileTemp.textContent = tMin.toFixed(1) + ' / ' + tMax.toFixed(1) + '°C';
     els.tileHum.textContent = hMin.toFixed(0) + ' / ' + hMax.toFixed(0) + '%';
+    els.tileBattery.textContent = haveBattery ? (bMin.toFixed(2) + ' / ' + bMax.toFixed(2) + 'V') : '—';
   }
 
   function renderTable() {
     if (state.allEntries.length === 0) {
-      els.logTableBody.innerHTML = '<tr><td colspan="4" class="hint" style="padding:14px;">No synced data yet</td></tr>';
+      els.logTableBody.innerHTML = '<tr><td colspan="5" class="hint" style="padding:14px;">No synced data yet</td></tr>';
       return;
     }
     var rows = state.allEntries.slice().reverse().slice(0, 200).map(function (e) {
       return '<tr><td>' + fmtTime(e.epochSeconds) + '</td><td>' + e.tempC.toFixed(1) +
-        '</td><td>' + e.humidity.toFixed(1) + '</td><td>' + e.pressureHPa.toFixed(0) + '</td></tr>';
+        '</td><td>' + e.humidity.toFixed(1) + '</td><td>' + e.pressureHPa.toFixed(0) +
+        '</td><td>' + (e.batteryV !== undefined ? e.batteryV.toFixed(2) : '—') + '</td></tr>';
     });
     els.logTableBody.innerHTML = rows.join('');
   }
@@ -934,18 +951,27 @@
   var METRIC_META = {
     tempC: { label: '°C', color: 'var(--accent)' },
     humidity: { label: '%RH', color: 'var(--accent-amber)' },
-    pressureHPa: { label: 'hPa', color: 'var(--accent-blue)' }
+    pressureHPa: { label: 'hPa', color: 'var(--accent-blue)' },
+    batteryV: { label: 'V', color: 'var(--accent-purple)' }
   };
 
+  function metricDecimals(metric) {
+    if (metric === 'pressureHPa') return 0;
+    if (metric === 'batteryV') return 2;
+    return 1;
+  }
+
   function renderChart() {
-    var data = state.allEntries;
+    var metric = state.activeMetric;
+    // Older synced entries (from before a field was added) won't have it -
+    // skip them for this metric rather than crash on undefined.
+    var data = state.allEntries.filter(function (e) { return e[metric] !== undefined; });
     if (data.length < 2) {
       els.chartHolder.innerHTML = '<p class="chart-empty">Need at least 2 synced readings to chart</p>';
       els.chartTooltip.hidden = true;
       state.chartGeom = null;
       return;
     }
-    var metric = state.activeMetric;
     var meta = METRIC_META[metric];
     var values = data.map(function (e) { return e[metric]; });
     var minV = Math.min.apply(null, values), maxV = Math.max.apply(null, values);
@@ -969,7 +995,7 @@
       gridLines += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy +
         '" stroke="var(--border)" stroke-width="1"/>';
       gridLines += '<text x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end" font-size="9" fill="var(--text-dim)" font-family="var(--font-mono)">' +
-        val.toFixed(metric === 'pressureHPa' ? 0 : 1) + '</text>';
+        val.toFixed(metricDecimals(metric)) + '</text>';
     }
 
     var lastX = x(data.length - 1), lastY = y(values[values.length - 1]);
@@ -1017,7 +1043,7 @@
     scrubDot.setAttribute('opacity', '1');
 
     var meta = METRIC_META[geom.metric];
-    var valStr = geom.metric === 'pressureHPa' ? entry[geom.metric].toFixed(0) : entry[geom.metric].toFixed(1);
+    var valStr = entry[geom.metric].toFixed(metricDecimals(geom.metric));
     els.chartTooltip.innerHTML = '<div class="tt-value">' + valStr + ' ' + meta.label +
       '</div><div class="tt-time">' + fmtTime(entry.epochSeconds) + '</div>';
     els.chartTooltip.hidden = false;
@@ -1049,10 +1075,11 @@
 
   // ---------- export ----------
   async function exportCsv() {
-    var rows = ['epoch_utc,datetime_utc,temp_c,humidity_pct,pressure_hpa'];
+    var rows = ['epoch_utc,datetime_utc,temp_c,humidity_pct,pressure_hpa,battery_v'];
     state.allEntries.forEach(function (e) {
       rows.push([e.epochSeconds, new Date(e.epochSeconds * 1000).toISOString(),
-        e.tempC.toFixed(2), e.humidity.toFixed(2), e.pressureHPa.toFixed(2)].join(','));
+        e.tempC.toFixed(2), e.humidity.toFixed(2), e.pressureHPa.toFixed(2),
+        e.batteryV !== undefined ? e.batteryV.toFixed(3) : ''].join(','));
     });
     var csv = rows.join('\n');
     var fname = 'camp-logger-' + new Date().toISOString().slice(0, 10) + '.csv';
