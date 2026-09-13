@@ -412,6 +412,7 @@
       <button class="metric-preset" data-value="0" disabled>Temp</button>
       <button class="metric-preset" data-value="1" disabled>Humidity</button>
       <button class="metric-preset" data-value="2" disabled>Pressure</button>
+      <button class="metric-preset" data-value="3" disabled>Battery</button>
     </div>
   </section>
 
@@ -746,7 +747,7 @@
     }
   }
 
-  var METRIC_NAMES = { 0: 'Temp', 1: 'Humidity', 2: 'Pressure' };
+  var METRIC_NAMES = { 0: 'Temp', 1: 'Humidity', 2: 'Pressure', 3: 'Battery' };
 
   async function refreshGraphMetric() {
     var value = await state.chars.graphMetric.readValue();
