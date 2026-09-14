@@ -724,9 +724,10 @@
     var value = await state.chars.currentReading.readValue();
     var entry = parseEntry(value);
     if (entry.epochSeconds === 0) return;
-    els.liveTemp.textContent = entry.tempC.toFixed(1);
-    els.liveHum.textContent = entry.humidity.toFixed(1);
-    els.livePres.textContent = entry.pressureHPa.toFixed(0);
+    // NaN means the device took this reading without its sensor plugged in.
+    els.liveTemp.textContent = isNaN(entry.tempC) ? '—' : entry.tempC.toFixed(1);
+    els.liveHum.textContent = isNaN(entry.humidity) ? '—' : entry.humidity.toFixed(1);
+    els.livePres.textContent = isNaN(entry.pressureHPa) ? '—' : entry.pressureHPa.toFixed(0);
     els.liveReadingTime.textContent = 'Reading at ' + fmtTime(entry.epochSeconds);
   }
 
@@ -1002,8 +1003,10 @@
       return;
     }
     var rows = state.allEntries.slice().reverse().slice(0, 200).map(function (e) {
-      return '<tr><td>' + (e.timeProvisional ? '~' : '') + fmtTime(e.epochSeconds) + '</td><td>' + e.tempC.toFixed(1) +
-        '</td><td>' + e.humidity.toFixed(1) + '</td><td>' + e.pressureHPa.toFixed(0) +
+      return '<tr><td>' + (e.timeProvisional ? '~' : '') + fmtTime(e.epochSeconds) + '</td><td>' +
+        (isNaN(e.tempC) ? '—' : e.tempC.toFixed(1)) +
+        '</td><td>' + (isNaN(e.humidity) ? '—' : e.humidity.toFixed(1)) +
+        '</td><td>' + (isNaN(e.pressureHPa) ? '—' : e.pressureHPa.toFixed(0)) +
         '</td><td>' + (hasValidValue(e.batteryV) ? e.batteryV.toFixed(2) : '—') + '</td></tr>';
     });
     els.logTableBody.innerHTML = rows.join('');
@@ -1160,7 +1163,10 @@
     var rows = ['epoch_utc,datetime_utc,temp_c,humidity_pct,pressure_hpa,battery_v,time_approx'];
     state.allEntries.forEach(function (e) {
       rows.push([e.epochSeconds, new Date(e.epochSeconds * 1000).toISOString(),
-        e.tempC.toFixed(2), e.humidity.toFixed(2), e.pressureHPa.toFixed(2),
+        // Blank rather than "NaN" for readings taken with the sensor unplugged.
+        isNaN(e.tempC) ? '' : e.tempC.toFixed(2),
+        isNaN(e.humidity) ? '' : e.humidity.toFixed(2),
+        isNaN(e.pressureHPa) ? '' : e.pressureHPa.toFixed(2),
         hasValidValue(e.batteryV) ? e.batteryV.toFixed(3) : '',
         e.timeProvisional ? '1' : '0'].join(','));
     });
