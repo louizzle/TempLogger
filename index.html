@@ -481,7 +481,7 @@
     <p class="panel-label">Log Table</p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Time (UTC)</th><th>&deg;C</th><th>%RH</th><th>hPa</th><th>V</th></tr></thead>
+        <thead><tr><th>Time</th><th>&deg;C</th><th>%RH</th><th>hPa</th><th>V</th></tr></thead>
         <tbody id="logTableBody"><tr><td colspan="5" class="hint" style="padding:14px;">No synced data yet</td></tr></tbody>
       </table>
     </div>
@@ -572,19 +572,20 @@
 
   // ---------- formatting helpers ----------
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
-  // UK format, matching the device's own display: dd-mm-yy HH:MM
+  // UK format in this phone's local time, matching the device's own display
+  // (which renders using the UTC offset we send it on connect): dd-mm-yy HH:MM
   function fmtTime(epochSeconds) {
     var d = new Date(epochSeconds * 1000);
-    return pad2(d.getUTCDate()) + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCFullYear() % 100) +
-      ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes());
+    return pad2(d.getDate()) + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getFullYear() % 100) +
+      ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
   function fmtDateOnly(epochSeconds) {
     var d = new Date(epochSeconds * 1000);
-    return pad2(d.getUTCDate()) + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCFullYear() % 100);
+    return pad2(d.getDate()) + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getFullYear() % 100);
   }
   function dayKey(epochSeconds) {
     var d = new Date(epochSeconds * 1000);
-    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
   }
 
   // ---------- BLE ----------
@@ -608,6 +609,17 @@
   function writeUint32(characteristic, value) {
     var buf = new ArrayBuffer(4);
     new DataView(buf).setUint32(0, value, true);
+    return characteristic.writeValueWithResponse(buf);
+  }
+
+  // Sends UTC epoch plus this phone's offset from UTC, so the device can render
+  // local time without knowing anything about timezones or DST switchovers.
+  // getTimezoneOffset() counts minutes behind UTC, hence the negation.
+  function writeTimeSync(characteristic) {
+    var buf = new ArrayBuffer(8);
+    var view = new DataView(buf);
+    view.setUint32(0, Math.floor(Date.now() / 1000), true);
+    view.setInt32(4, -new Date().getTimezoneOffset() * 60, true);
     return characteristic.writeValueWithResponse(buf);
   }
 
@@ -643,7 +655,7 @@
       diag('All characteristics found. Syncing time...');
 
       // Sync the device's clock to this phone's time on every connect.
-      await writeUint32(state.chars.timeSync, Math.floor(Date.now() / 1000));
+      await writeTimeSync(state.chars.timeSync);
       diag('Time synced. Reading current values...');
 
       await refreshLiveReading();
@@ -705,7 +717,7 @@
     els.liveTemp.textContent = entry.tempC.toFixed(1);
     els.liveHum.textContent = entry.humidity.toFixed(1);
     els.livePres.textContent = entry.pressureHPa.toFixed(0);
-    els.liveReadingTime.textContent = 'Reading at ' + fmtTime(entry.epochSeconds) + ' UTC';
+    els.liveReadingTime.textContent = 'Reading at ' + fmtTime(entry.epochSeconds);
   }
 
   async function refreshBattery() {
