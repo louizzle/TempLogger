@@ -975,20 +975,24 @@
     els.tileRange.textContent = fmtDateOnly(first.epochSeconds) + ' → ' + fmtDateOnly(last.epochSeconds);
 
     var tMin = Infinity, tMax = -Infinity, hMin = Infinity, hMax = -Infinity;
-    var bMin = Infinity, bMax = -Infinity, haveBattery = false;
+    var bMin = Infinity, bMax = -Infinity, haveBattery = false, haveBme = false;
+    // Implausible readings stay in the table and CSV but don't set these ranges.
     state.allEntries.forEach(function (e) {
-      if (e.tempC < tMin) tMin = e.tempC;
-      if (e.tempC > tMax) tMax = e.tempC;
-      if (e.humidity < hMin) hMin = e.humidity;
-      if (e.humidity > hMax) hMax = e.humidity;
-      if (hasValidValue(e.batteryV)) {
+      if (bmePlausible(e)) {
+        haveBme = true;
+        if (e.tempC < tMin) tMin = e.tempC;
+        if (e.tempC > tMax) tMax = e.tempC;
+        if (e.humidity < hMin) hMin = e.humidity;
+        if (e.humidity > hMax) hMax = e.humidity;
+      }
+      if (batteryPlausible(e.batteryV)) {
         haveBattery = true;
         if (e.batteryV < bMin) bMin = e.batteryV;
         if (e.batteryV > bMax) bMax = e.batteryV;
       }
     });
-    els.tileTemp.textContent = tMin.toFixed(1) + ' / ' + tMax.toFixed(1) + '°C';
-    els.tileHum.textContent = hMin.toFixed(0) + ' / ' + hMax.toFixed(0) + '%';
+    els.tileTemp.textContent = haveBme ? (tMin.toFixed(1) + ' / ' + tMax.toFixed(1) + '°C') : '—';
+    els.tileHum.textContent = haveBme ? (hMin.toFixed(0) + ' / ' + hMax.toFixed(0) + '%') : '—';
     els.tileBattery.textContent = haveBattery ? (bMin.toFixed(2) + ' / ' + bMax.toFixed(2) + 'V') : '—';
   }
 
@@ -1016,6 +1020,19 @@
     return v !== undefined && !isNaN(v);
   }
 
+  // Same plausibility bounds as the firmware (FlashLog.h): the BME280's rated
+  // range and what one LiPo cell can present. Temperature, humidity and pressure
+  // share one conversion, so any of them out of range makes all three suspect.
+  // NaN fails every comparison, so it counts as implausible too.
+  function bmePlausible(e) {
+    return e.tempC >= -40 && e.tempC <= 85 &&
+      e.pressureHPa >= 300 && e.pressureHPa <= 1100 &&
+      e.humidity >= 0 && e.humidity <= 100;
+  }
+  function batteryPlausible(v) {
+    return hasValidValue(v) && v >= 2.5 && v <= 4.5;
+  }
+
   function metricDecimals(metric) {
     if (metric === 'pressureHPa') return 0;
     if (metric === 'batteryV') return 2;
@@ -1024,9 +1041,11 @@
 
   function renderChart() {
     var metric = state.activeMetric;
-    // Older synced entries (from before a field was added) won't have it -
-    // skip them for this metric rather than crash on undefined.
-    var data = state.allEntries.filter(function (e) { return hasValidValue(e[metric]); });
+    // Skip entries without this field (synced before it existed) and implausible
+    // readings, which would crush the scale. Both stay in the table and CSV.
+    var data = state.allEntries.filter(function (e) {
+      return metric === 'batteryV' ? batteryPlausible(e.batteryV) : bmePlausible(e);
+    });
     if (data.length < 2) {
       els.chartHolder.innerHTML = '<p class="chart-empty">Need at least 2 synced readings to chart</p>';
       els.chartTooltip.hidden = true;
