@@ -601,8 +601,13 @@
   function le32(view, offset) { return view.getUint32(offset, true); }
 
   function parseEntry(dataView) {
+    // The device sets the top bit of epochSeconds on entries it logged before
+    // it had a real clock. Strip it, but keep the fact: those times are
+    // estimates and shouldn't be shown as if they were measured.
+    var rawEpoch = le32(dataView, 0);
     return {
-      epochSeconds: le32(dataView, 0),
+      epochSeconds: rawEpoch & 0x7FFFFFFF,
+      timeProvisional: (rawEpoch & 0x80000000) !== 0,
       tempC: dataView.getFloat32(4, true),
       humidity: dataView.getFloat32(8, true),
       pressureHPa: dataView.getFloat32(12, true),
@@ -993,7 +998,7 @@
       return;
     }
     var rows = state.allEntries.slice().reverse().slice(0, 200).map(function (e) {
-      return '<tr><td>' + fmtTime(e.epochSeconds) + '</td><td>' + e.tempC.toFixed(1) +
+      return '<tr><td>' + (e.timeProvisional ? '~' : '') + fmtTime(e.epochSeconds) + '</td><td>' + e.tempC.toFixed(1) +
         '</td><td>' + e.humidity.toFixed(1) + '</td><td>' + e.pressureHPa.toFixed(0) +
         '</td><td>' + (hasValidValue(e.batteryV) ? e.batteryV.toFixed(2) : '—') + '</td></tr>';
     });
@@ -1131,11 +1136,14 @@
 
   // ---------- export ----------
   async function exportCsv() {
-    var rows = ['epoch_utc,datetime_utc,temp_c,humidity_pct,pressure_hpa,battery_v'];
+    // time_approx marks rows the device logged before it had a real clock, so
+    // the timestamp is an estimate rather than a measurement.
+    var rows = ['epoch_utc,datetime_utc,temp_c,humidity_pct,pressure_hpa,battery_v,time_approx'];
     state.allEntries.forEach(function (e) {
       rows.push([e.epochSeconds, new Date(e.epochSeconds * 1000).toISOString(),
         e.tempC.toFixed(2), e.humidity.toFixed(2), e.pressureHPa.toFixed(2),
-        hasValidValue(e.batteryV) ? e.batteryV.toFixed(3) : ''].join(','));
+        hasValidValue(e.batteryV) ? e.batteryV.toFixed(3) : '',
+        e.timeProvisional ? '1' : '0'].join(','));
     });
     var csv = rows.join('\n');
     var fname = 'camp-logger-' + new Date().toISOString().slice(0, 10) + '.csv';
