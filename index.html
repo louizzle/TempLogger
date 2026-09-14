@@ -605,13 +605,17 @@
     // it had a real clock. Strip it, but keep the fact: those times are
     // estimates and shouldn't be shown as if they were measured.
     var rawEpoch = le32(dataView, 0);
+    // The battery voltage's sign is a flag: negative means the reading was taken
+    // on USB power. Entries from before the flag existed are all positive.
+    var rawBattery = dataView.byteLength >= 20 ? dataView.getFloat32(16, true) : undefined;
     return {
       epochSeconds: rawEpoch & 0x7FFFFFFF,
       timeProvisional: (rawEpoch & 0x80000000) !== 0,
       tempC: dataView.getFloat32(4, true),
       humidity: dataView.getFloat32(8, true),
       pressureHPa: dataView.getFloat32(12, true),
-      batteryV: dataView.byteLength >= 20 ? dataView.getFloat32(16, true) : undefined
+      batteryV: rawBattery === undefined ? undefined : Math.abs(rawBattery),
+      onUsb: rawBattery !== undefined && rawBattery < 0
     };
   }
 
@@ -1007,7 +1011,7 @@
         (isNaN(e.tempC) ? '—' : e.tempC.toFixed(1)) +
         '</td><td>' + (isNaN(e.humidity) ? '—' : e.humidity.toFixed(1)) +
         '</td><td>' + (isNaN(e.pressureHPa) ? '—' : e.pressureHPa.toFixed(0)) +
-        '</td><td>' + (hasValidValue(e.batteryV) ? e.batteryV.toFixed(2) : '—') + '</td></tr>';
+        '</td><td>' + (hasValidValue(e.batteryV) ? e.batteryV.toFixed(2) + (e.onUsb ? ' USB' : '') : '—') + '</td></tr>';
     });
     els.logTableBody.innerHTML = rows.join('');
   }
@@ -1160,7 +1164,9 @@
   async function exportCsv() {
     // time_approx marks rows the device logged before it had a real clock, so
     // the timestamp is an estimate rather than a measurement.
-    var rows = ['epoch_utc,datetime_utc,temp_c,humidity_pct,pressure_hpa,battery_v,time_approx'];
+    // on_usb marks rows logged on USB power, so charging stretches can be told
+    // apart from battery discharge.
+    var rows = ['epoch_utc,datetime_utc,temp_c,humidity_pct,pressure_hpa,battery_v,time_approx,on_usb'];
     state.allEntries.forEach(function (e) {
       rows.push([e.epochSeconds, new Date(e.epochSeconds * 1000).toISOString(),
         // Blank rather than "NaN" for readings taken with the sensor unplugged.
@@ -1168,7 +1174,8 @@
         isNaN(e.humidity) ? '' : e.humidity.toFixed(2),
         isNaN(e.pressureHPa) ? '' : e.pressureHPa.toFixed(2),
         hasValidValue(e.batteryV) ? e.batteryV.toFixed(3) : '',
-        e.timeProvisional ? '1' : '0'].join(','));
+        e.timeProvisional ? '1' : '0',
+        e.onUsb ? '1' : '0'].join(','));
     });
     var csv = rows.join('\n');
     var fname = 'camp-logger-' + new Date().toISOString().slice(0, 10) + '.csv';
