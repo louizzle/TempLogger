@@ -665,6 +665,9 @@
       state.chars.interval = await service.getCharacteristic(CHAR_UUIDS.interval);
       state.chars.graphMetric = await service.getCharacteristic(CHAR_UUIDS.graphMetric);
       state.chars.battery = await service.getCharacteristic(CHAR_UUIDS.battery);
+      // Subscribed before the time sync, so the corrected reading the device
+      // pushes after fixing its clock isn't missed.
+      await subscribeToLiveUpdates();
       diag('All characteristics found. Syncing time...');
 
       // Sync the device's clock to this phone's time on every connect.
@@ -724,29 +727,83 @@
     });
   }
 
-  async function refreshLiveReading() {
-    var value = await state.chars.currentReading.readValue();
-    var entry = parseEntry(value);
-    if (entry.epochSeconds === 0) return;
+  // These render a value whether it was read on connect or pushed by the device
+  // as a notification after a reading.
+  function showLiveReading(dataView) {
+    var entry = parseEntry(dataView);
+    if (entry.epochSeconds === 0) return null;
     // NaN means the device took this reading without its sensor plugged in.
     els.liveTemp.textContent = isNaN(entry.tempC) ? '—' : entry.tempC.toFixed(1);
     els.liveHum.textContent = isNaN(entry.humidity) ? '—' : entry.humidity.toFixed(1);
     els.livePres.textContent = isNaN(entry.pressureHPa) ? '—' : entry.pressureHPa.toFixed(0);
     els.liveReadingTime.textContent = 'Reading at ' + fmtTime(entry.epochSeconds);
+    return entry;
   }
 
-  async function refreshBattery() {
-    var value = await state.chars.battery.readValue();
-    var voltage = value.getFloat32(0, true);
-    var percent = value.getUint8(4);
+  function showBattery(dataView) {
+    var voltage = dataView.getFloat32(0, true);
+    var percent = dataView.getUint8(4);
     els.liveBattery.textContent = 'Battery: ' + voltage.toFixed(2) + 'V (' + percent + '%)';
   }
 
-  async function refreshDeviceLogCount() {
-    var value = await state.chars.logCount.readValue();
-    var count = le32(value, 0);
+  function showDeviceLogCount(dataView) {
+    var count = le32(dataView, 0);
     els.deviceLogCount.textContent = 'Device log: ' + count + ' entries';
+    state.lastLogCount = count;
     return count;
+  }
+
+  async function refreshLiveReading() {
+    showLiveReading(await state.chars.currentReading.readValue());
+  }
+
+  async function refreshBattery() {
+    showBattery(await state.chars.battery.readValue());
+  }
+
+  async function refreshDeviceLogCount() {
+    return showDeviceLogCount(await state.chars.logCount.readValue());
+  }
+
+  // The device pushes its current reading, log count and battery after every
+  // reading. Firmware from before notifications existed refuses the subscribe,
+  // and the app then works as before, with values read once on connect.
+  async function subscribeToLiveUpdates() {
+    state.liveEntry = null;
+    state.lastLogCount = null;
+    try {
+      state.chars.currentReading.addEventListener('characteristicvaluechanged', function (ev) {
+        // Held until the log count confirms it was logged: the device also pushes
+        // readings it only redraws, such as after correcting its clock.
+        state.liveEntry = showLiveReading(ev.target.value);
+      });
+      state.chars.battery.addEventListener('characteristicvaluechanged', function (ev) {
+        showBattery(ev.target.value);
+      });
+      state.chars.logCount.addEventListener('characteristicvaluechanged', onLogCountNotified);
+      await state.chars.currentReading.startNotifications();
+      await state.chars.logCount.startNotifications();
+      await state.chars.battery.startNotifications();
+      diag('Live updates enabled.');
+    } catch (err) {
+      diag('Live updates unavailable (' + (err.message || err) + ') - device firmware may predate them.');
+    }
+  }
+
+  // Adds each newly logged reading to the synced history while connected, so
+  // Sync Log is only needed for readings taken while the phone was away.
+  async function onLogCountNotified(ev) {
+    var previous = state.lastLogCount;
+    var count = showDeviceLogCount(ev.target.value);
+    if (previous === null || count <= previous) return; // first value, or the log was cleared
+    if (count === previous + 1 && state.liveEntry) {
+      var entry = state.liveEntry;
+      state.liveEntry = null;
+      await mergeEntries([entry]);
+      await renderAll();
+    } else {
+      diag((count - previous) + ' new device entries arrived without their readings - use Sync Log to fetch them.');
+    }
   }
 
   function formatInterval(seconds) {
